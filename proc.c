@@ -88,6 +88,7 @@ allocproc(void)
 found:
   p->state = EMBRYO;
   p->pid = nextpid++;
+  p->priority = 1; //default priority 1
 
   release(&ptable.lock);
 
@@ -199,6 +200,7 @@ fork(void)
   np->sz = curproc->sz;
   np->parent = curproc;
   *np->tf = *curproc->tf;
+  np->priority = curproc->priority; //fork child priority
 
   // Clear %eax so that fork returns 0 in the child.
   np->tf->eax = 0;
@@ -342,6 +344,8 @@ scheduler(void)
       c->proc = p;
       switchuvm(p);
       p->state = RUNNING;
+
+      lapicsettimer(p->priority * 1000000);
 
       swtch(&(c->scheduler), p->context);
       switchkvm();

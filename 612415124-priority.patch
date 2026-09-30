@@ -1,0 +1,150 @@
+diff --git a/Makefile b/Makefile
+index b4d8c1b..4d95913 100644
+--- a/Makefile
++++ b/Makefile
+@@ -181,6 +181,7 @@ UPROGS=\
+ 	_usertests\
+ 	_wc\
+ 	_zombie\
++	_prioritytest\
+ 
+ fs.img: mkfs README $(UPROGS)
+ 	./mkfs fs.img README $(UPROGS)
+diff --git a/defs.h b/defs.h
+index 82fb982..ea1fb1d 100644
+--- a/defs.h
++++ b/defs.h
+@@ -78,6 +78,7 @@ int             lapicid(void);
+ extern volatile uint*    lapic;
+ void            lapiceoi(void);
+ void            lapicinit(void);
++void lapicsettimer(int);
+ void            lapicstartap(uchar, uint);
+ void            microdelay(int);
+ 
+diff --git a/lapic.c b/lapic.c
+index b22bbd7..769c994 100644
+--- a/lapic.c
++++ b/lapic.c
+@@ -97,6 +97,10 @@ lapicinit(void)
+   lapicw(TPR, 0);
+ }
+ 
++void lapicsettimer(int quantum) {
++  lapicw(TICR, quantum);
++}
++
+ int
+ lapicid(void)
+ {
+diff --git a/proc.c b/proc.c
+index 806b1b1..62bac54 100644
+--- a/proc.c
++++ b/proc.c
+@@ -88,6 +88,7 @@ allocproc(void)
+ found:
+   p->state = EMBRYO;
+   p->pid = nextpid++;
++  p->priority = 1; //default priority 1
+ 
+   release(&ptable.lock);
+ 
+@@ -199,6 +200,7 @@ fork(void)
+   np->sz = curproc->sz;
+   np->parent = curproc;
+   *np->tf = *curproc->tf;
++  np->priority = curproc->priority; //fork child priority
+ 
+   // Clear %eax so that fork returns 0 in the child.
+   np->tf->eax = 0;
+@@ -343,6 +345,8 @@ scheduler(void)
+       switchuvm(p);
+       p->state = RUNNING;
+ 
++      lapicsettimer(p->priority * 1000000);
++
+       swtch(&(c->scheduler), p->context);
+       switchkvm();
+ 
+diff --git a/proc.h b/proc.h
+index 1647114..724bd36 100644
+--- a/proc.h
++++ b/proc.h
+@@ -41,6 +41,7 @@ struct proc {
+   char *kstack;                // Bottom of kernel stack for this process
+   enum procstate state;        // Process state
+   int pid;                     // Process ID
++  int priority; //priority
+   struct proc *parent;         // Parent process
+   struct trapframe *tf;        // Trap frame for current syscall
+   struct context *context;     // swtch() here to run process
+diff --git a/syscall.c b/syscall.c
+index ee85261..9218bc1 100644
+--- a/syscall.c
++++ b/syscall.c
+@@ -103,6 +103,7 @@ extern int sys_unlink(void);
+ extern int sys_wait(void);
+ extern int sys_write(void);
+ extern int sys_uptime(void);
++extern int sys_nice(void);
+ 
+ static int (*syscalls[])(void) = {
+ [SYS_fork]    sys_fork,
+@@ -126,6 +127,7 @@ static int (*syscalls[])(void) = {
+ [SYS_link]    sys_link,
+ [SYS_mkdir]   sys_mkdir,
+ [SYS_close]   sys_close,
++[SYS_nice] sys_nice,
+ };
+ 
+ void
+diff --git a/syscall.h b/syscall.h
+index bc5f356..0b422b1 100644
+--- a/syscall.h
++++ b/syscall.h
+@@ -20,3 +20,4 @@
+ #define SYS_link   19
+ #define SYS_mkdir  20
+ #define SYS_close  21
++#define SYS_nice 22
+\ No newline at end of file
+diff --git a/sysproc.c b/sysproc.c
+index 0686d29..70b4fc7 100644
+--- a/sysproc.c
++++ b/sysproc.c
+@@ -89,3 +89,14 @@ sys_uptime(void)
+   release(&tickslock);
+   return xticks;
+ }
++
++int
++sys_nice(void)
++{
++  int priority;
++  if(argint(0, &priority) < 0) return -1;
++  if(priority <= 0) return -1;
++
++  myproc()->priority = priority;
++  return 0;
++}
+diff --git a/user.h b/user.h
+index 4f99c52..fffd1df 100644
+--- a/user.h
++++ b/user.h
+@@ -5,6 +5,7 @@ struct rtcdate;
+ int fork(void);
+ int exit(void) __attribute__((noreturn));
+ int wait(void);
++int nice(int);
+ int pipe(int*);
+ int write(int, const void*, int);
+ int read(int, void*, int);
+diff --git a/usys.S b/usys.S
+index 8bfd8a1..116326e 100644
+--- a/usys.S
++++ b/usys.S
+@@ -29,3 +29,4 @@ SYSCALL(getpid)
+ SYSCALL(sbrk)
+ SYSCALL(sleep)
+ SYSCALL(uptime)
++SYSCALL(nice)

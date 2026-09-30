@@ -97,6 +97,10 @@ lapicinit(void)
   lapicw(TPR, 0);
 }
 
+void lapicsettimer(int quantum) {
+  lapicw(TICR, quantum);
+}
+
 int
 lapicid(void)
 {
